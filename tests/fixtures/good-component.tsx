@@ -21,7 +21,7 @@ export function GoodForm({ imageUrl, onSubmit }: Props) {
       <h1>Accessible Form</h1>
 
       {/* Image with alt text */}
-      <img src={imageUrl} alt="A descriptive caption for the image" />
+      <img src={imageUrl} alt="A hero banner showing the product in use" />
 
       {/* SVG with aria-label */}
       <svg aria-label="Settings icon" viewBox="0 0 24 24">

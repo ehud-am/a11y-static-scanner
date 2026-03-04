@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { dir } from 'tmp-promise';
 import type { FetchedRepo, RepoFetcher } from '../types.js';
 
+/** Extract `owner` and `repo` from a GitHub HTTPS URL. */
 function parseGitHubUrl(url: string): { owner: string; repo: string } {
   const { pathname } = new URL(url);
   const parts = pathname.replace(/^\//, '').replace(/\.git$/, '').split('/');
@@ -16,7 +17,19 @@ function parseGitHubUrl(url: string): { owner: string; repo: string } {
   return { owner: parts[0], repo: parts[1] };
 }
 
+/**
+ * Downloads a GitHub repository as a zip archive via the GitHub API and
+ * extracts it to a temporary directory.
+ *
+ * Uses the Octokit REST client so that private repos work with a PAT and
+ * rate-limit handling is delegated to the library.
+ */
 export class GitHubFetcher implements RepoFetcher {
+  /**
+   * @param url    Full GitHub HTTPS URL (e.g. `https://github.com/org/repo`).
+   * @param token  Optional GitHub personal access token for private repos.
+   * @param branch Branch to download; defaults to the repo's default branch.
+   */
   async fetch(url: string, token?: string, branch?: string): Promise<FetchedRepo> {
     const { owner, repo } = parseGitHubUrl(url);
 

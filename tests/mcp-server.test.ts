@@ -193,6 +193,15 @@ describe('AnalyzeRepoSchema validation', () => {
 // ─── createFetcher routing ────────────────────────────────────────────────────
 
 describe('createFetcher', () => {
+  // vi.doMock calls in earlier describe blocks register a mock factory that
+  // survives vi.resetModules() (which only clears the module cache).  We must
+  // also call vi.doUnmock() so the next import picks up the real module.
+  beforeEach(() => {
+    vi.doUnmock('../src/fetcher/index.js');
+    vi.resetModules();
+    vi.restoreAllMocks();
+  });
+
   it('returns a fetcher for github.com URLs', async () => {
     const { createFetcher } = await import('../src/fetcher/index.js');
     const fetcher = createFetcher('https://github.com/org/repo');

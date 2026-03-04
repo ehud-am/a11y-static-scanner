@@ -37,6 +37,9 @@ export function BadComponent({ imageUrl, onClick }: Props) {
         No focus ring
       </button>
 
+      {/* 1.3.1 — Label with no associated control */}
+      <label>First Name</label>
+
       {/* 1.3.1 — Input with no label */}
       <input type="text" placeholder="Name" />
 

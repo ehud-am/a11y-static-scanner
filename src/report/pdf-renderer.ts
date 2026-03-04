@@ -124,44 +124,52 @@ function buildRepoBlock(doc: PDFKit.PDFDocument, report: ReportResult): void {
 }
 
 function buildComplianceBanner(doc: PDFKit.PDFDocument, report: ReportResult): void {
-  const { overall_level, aa_pass_rate, aaa_pass_rate, total_issues } = report.summary;
+  const { overall_level, a_pass_rate, aa_pass_rate, aaa_pass_rate, total_issues } = report.summary;
   const levelColor = LEVEL_COLOR[overall_level];
 
-  // Outer card
+  // Outer card — taller to accommodate two rows
   doc
-    .rect(PAGE.margin, doc.y, CONTENT_W, 60)
+    .rect(PAGE.margin, doc.y, CONTENT_W, 84)
     .fill(BRAND.light);
 
   const y0 = doc.y + 10;
 
-  // Overall level label
+  // ── Row 1: Overall compliance + Total issues ─────────────────────────────
   doc.font('Helvetica-Bold').fontSize(9).fillColor(BRAND.muted)
     .text('OVERALL COMPLIANCE', PAGE.margin + 10, y0, { lineBreak: false });
   doc.font('Helvetica-Bold').fontSize(18).fillColor(levelColor)
     .text(overall_level, PAGE.margin + 10, y0 + 12, { lineBreak: false });
 
-  // AA pass rate
-  const col2 = PAGE.margin + CONTENT_W * 0.38;
+  const colRight = PAGE.margin + CONTENT_W * 0.78;
   doc.font('Helvetica-Bold').fontSize(9).fillColor(BRAND.muted)
-    .text('AA PASS RATE', col2, y0, { lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(18).fillColor(aa_pass_rate === 100 ? '#15803D' : levelColor)
-    .text(`${aa_pass_rate}%`, col2, y0 + 12, { lineBreak: false });
+    .text('TOTAL ISSUES', colRight, y0, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(18).fillColor(total_issues === 0 ? '#15803D' : BRAND.text)
+    .text(String(total_issues), colRight, y0 + 12, { lineBreak: false });
+
+  // ── Row 2: A / AA / AAA pass rates ──────────────────────────────────────
+  const y1 = y0 + 40;
+
+  // A pass rate
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(BRAND.muted)
+    .text('A PASS RATE', PAGE.margin + 10, y1, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(a_pass_rate === 100 ? '#15803D' : '#DC2626')
+    .text(`${a_pass_rate}%`, PAGE.margin + 10, y1 + 12, { lineBreak: false });
+
+  // AA pass rate
+  const colAA = PAGE.margin + CONTENT_W * 0.33;
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(BRAND.muted)
+    .text('AA PASS RATE', colAA, y1, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(aa_pass_rate === 100 ? '#15803D' : levelColor)
+    .text(`${aa_pass_rate}%`, colAA, y1 + 12, { lineBreak: false });
 
   // AAA pass rate
-  const col3 = PAGE.margin + CONTENT_W * 0.6;
+  const colAAA = PAGE.margin + CONTENT_W * 0.62;
   doc.font('Helvetica-Bold').fontSize(9).fillColor(BRAND.muted)
-    .text('AAA PASS RATE', col3, y0, { lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(18).fillColor(BRAND.accent)
-    .text(`${aaa_pass_rate}%`, col3, y0 + 12, { lineBreak: false });
+    .text('AAA PASS RATE', colAAA, y1, { lineBreak: false });
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(BRAND.accent)
+    .text(`${aaa_pass_rate}%`, colAAA, y1 + 12, { lineBreak: false });
 
-  // Total issues
-  const col4 = PAGE.margin + CONTENT_W * 0.82;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(BRAND.muted)
-    .text('TOTAL ISSUES', col4, y0, { lineBreak: false });
-  doc.font('Helvetica-Bold').fontSize(18).fillColor(total_issues === 0 ? '#15803D' : BRAND.text)
-    .text(String(total_issues), col4, y0 + 12, { lineBreak: false });
-
-  doc.y += 68;
+  doc.y += 92;
   doc.moveDown(0.5);
 }
 

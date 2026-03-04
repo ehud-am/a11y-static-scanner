@@ -67,6 +67,23 @@ function quickSummaryText(report: ReturnType<typeof generateReport>): string {
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
+/**
+ * MCP tool handler for `analyze_local_path`.
+ *
+ * Validates the target directory, discovers React + HTML files, runs the
+ * analysis engine, and renders the result in the requested format.
+ *
+ * Unlike `analyze_repo`, this handler operates directly on the local
+ * filesystem — no download or cleanup is required.
+ *
+ * @returns A string appropriate for the chosen format:
+ *   - `"json"`     → JSON-serialised {@link ReportResult}
+ *   - `"markdown"` → human-readable Markdown summary
+ *   - `"pdf"`      → confirmation message with the saved file path
+ *   - `"excel"`    → confirmation message with the saved file path
+ *
+ * @throws If `local_path` does not exist or is not a directory.
+ */
 export async function handleAnalyzeLocal(input: AnalyzeLocalInput): Promise<string> {
   const { local_path, path_filter, format, output_path } = input;
 

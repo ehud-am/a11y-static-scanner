@@ -135,6 +135,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: ReportResult): void {
 
   // Pass rates
   const rates: [string, string][] = [
+    ['A Pass Rate',   `${report.summary.a_pass_rate}%`],
     ['AA Pass Rate',  `${report.summary.aa_pass_rate}%`],
     ['AAA Pass Rate', `${report.summary.aaa_pass_rate}%`],
     ['Total Issues',  String(report.summary.total_issues)],

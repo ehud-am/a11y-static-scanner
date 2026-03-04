@@ -72,13 +72,62 @@ function bestAnchorFile(filePaths: string[], repoRoot: string): string {
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
+/**
+ * Rule pairs where both rules detect the exact same violation.
+ * When the preferred rule fires at a given file+line, the redundant rule is
+ * suppressed — even though their rule IDs differ.
+ *
+ * Format: [preferred (kept), redundant (dropped)]
+ */
+const EQUIVALENT_RULE_PAIRS: ReadonlyArray<[preferred: string, redundant: string]> = [
+  // jsx-a11y and the custom AST pass both flag onClick-without-keyboard on
+  // non-interactive elements; keep the jsx-a11y report, drop the custom one.
+  ['jsx-a11y/click-events-have-key-events', 'custom/onclick-without-keyboard'],
+
+  // jsx-a11y/img-redundant-alt fires when alt text contains "image", "photo",
+  // or "picture". custom/nondescriptive-alt-text fires when alt is exactly one
+  // of those words (plus others like "logo", "icon"). The two co-fire on e.g.
+  // alt="image", alt="photo", alt="photograph", alt="picture". Keep the
+  // jsx-a11y report; the custom rule covers the broader set on its own for
+  // words that img-redundant-alt doesn't catch (e.g. "logo", "avatar").
+  ['jsx-a11y/img-redundant-alt', 'custom/nondescriptive-alt-text'],
+
+  // jsx-a11y/interactive-supports-focus fires when a role="button" (or other
+  // interactive role) element has event handlers but no tabIndex. The custom
+  // rule fires when role="button" lacks ALL of [onKeyDown, onKeyPress, onKeyUp,
+  // tabIndex]. Both co-fire on e.g. <div role="button" onClick={fn}> with no
+  // tabIndex and no keyboard handlers. Keep the jsx-a11y report.
+  ['jsx-a11y/interactive-supports-focus', 'custom/role-button-no-keyboard'],
+];
+
 function deduplicateIssues(issues: Issue[]): Issue[] {
+  // Pass 1: exact same rule at the same location
   const seen = new Set<string>();
-  return issues.filter((issue) => {
+  const pass1 = issues.filter((issue) => {
     const key = `${issue.file}:${issue.line}:${issue.column}:${issue.rule_id}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+
+  // Pass 2: cross-rule dedup — suppress redundant rules that overlap with a
+  // preferred rule at the same file + line (columns may differ between ESLint
+  // and the Babel AST pass, so we match on file+line only).
+  const toSuppress = new Map<string, Set<string>>(); // "file:line" -> redundant rule IDs
+  for (const [preferred, redundant] of EQUIVALENT_RULE_PAIRS) {
+    for (const issue of pass1) {
+      if (issue.rule_id === preferred) {
+        const key = `${issue.file}:${issue.line}`;
+        if (!toSuppress.has(key)) toSuppress.set(key, new Set());
+        toSuppress.get(key)!.add(redundant);
+      }
+    }
+  }
+
+  if (toSuppress.size === 0) return pass1;
+  return pass1.filter((issue) => {
+    const key = `${issue.file}:${issue.line}`;
+    return !toSuppress.get(key)?.has(issue.rule_id);
   });
 }
 
@@ -255,6 +304,22 @@ async function checkLandmarks(
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/**
+ * Run all analysis passes against the given set of React/JSX/TSX files and
+ * return a deduplicated, flat list of accessibility issues.
+ *
+ * Analysis steps (in order):
+ *   1. ESLint pass (jsx-a11y rules) + Babel AST pass on each React file,
+ *      executed in parallel batches of {@link CONCURRENCY}.
+ *   2. HTML-file pass on any `.html`/`.htm` files discovered under `repoRoot`.
+ *   3. App-level skip-link check — one issue if no "skip to main content"
+ *      link is found across the entire project.
+ *   4. App-level landmark check — issues if no `<main>` or `<nav>` is found.
+ *
+ * @param reactFilePaths Absolute paths to React source files to analyse.
+ * @param repoRoot       Absolute path to the repo root; used for relative
+ *                       file paths in issue objects and HTML file discovery.
+ */
 export async function analyzeFiles(
   reactFilePaths: string[],
   repoRoot: string,

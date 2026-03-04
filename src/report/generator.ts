@@ -12,29 +12,55 @@ import { CHECKABLE_CRITERIA, WCAG_CRITERIA } from '../analysis/wcag-map.js';
 // ─── Pass-rate computation ────────────────────────────────────────────────────
 
 /**
- * For each WCAG level, compute what fraction of the *statically checkable*
- * criteria have zero violations. Returns a 0–100 number.
+ * Compute the pass rate for a given WCAG conformance level using a
+ * *cumulative* (inclusive) model that mirrors real-world compliance:
+ *
+ *   a_pass_rate   = % of Level A checkable criteria with no violations
+ *   aa_pass_rate  = % of Level A + AA checkable criteria with no violations
+ *   aaa_pass_rate = % of Level A + AA + AAA checkable criteria with no violations
+ *
+ * This means an A-level violation will lower both the A and AA pass rates,
+ * correctly reflecting that WCAG AA conformance requires ALL A and AA
+ * criteria to be met.  Returns a 0–100 integer.
  */
 function computePassRate(issues: Issue[], level: WcagLevel): number {
-  const criteriaAtLevel = new Set(
+  // Cumulative: 'AA' includes A criteria; 'AAA' includes A+AA criteria.
+  const levelsToInclude: WcagLevel[] =
+    level === 'A'  ? ['A'] :
+    level === 'AA' ? ['A', 'AA'] :
+                    ['A', 'AA', 'AAA'];
+
+  const criteriaInScope = new Set(
     Object.values(WCAG_CRITERIA)
-      .filter((c) => c.level === level)
+      .filter((c) => levelsToInclude.includes(c.level))
       .map((c) => c.id)
       .filter((id) => CHECKABLE_CRITERIA.has(id)),
   );
 
-  if (criteriaAtLevel.size === 0) return 100;
+  if (criteriaInScope.size === 0) return 100;
 
   const failedCriteria = new Set(
-    issues.filter((i) => i.wcag_level === level).map((i) => i.wcag_criterion),
+    issues
+      .filter((i) => levelsToInclude.includes(i.wcag_level))
+      .map((i) => i.wcag_criterion),
   );
 
-  const passed = [...criteriaAtLevel].filter((id) => !failedCriteria.has(id)).length;
-  return Math.round((passed / criteriaAtLevel.size) * 100);
+  const passed = [...criteriaInScope].filter((id) => !failedCriteria.has(id)).length;
+  return Math.round((passed / criteriaInScope.size) * 100);
 }
 
 // ─── Overall compliance level ─────────────────────────────────────────────────
 
+/**
+ * Classify the project's overall WCAG 2.2 compliance level based on the
+ * number and severity of detected violations.
+ *
+ * Thresholds (intentionally conservative for a static-analysis tool):
+ *   Non-compliant  — >5 critical Level-A violations, OR >20 A issues AND >10 AA issues
+ *   Partial AA     — any A or AA violation
+ *   AA             — no A/AA violations; AAA issues only
+ *   AAA            — zero violations across all levels
+ */
 function deriveOverallLevel(issues: Issue[]): OverallLevel {
   const aCritical = issues.filter(
     (i) => i.wcag_level === 'A' && i.severity === 'critical',
@@ -50,6 +76,7 @@ function deriveOverallLevel(issues: Issue[]): OverallLevel {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/** Options passed to {@link generateReport}. */
 export interface GenerateReportOptions {
   repoUrl: string;
   branch: string;
@@ -58,6 +85,12 @@ export interface GenerateReportOptions {
   issues: Issue[];
 }
 
+/**
+ * Build a complete {@link ReportResult} from a raw issue list.
+ *
+ * Computes all summary statistics (pass rates, severity counts, overall level)
+ * and sorts the issues by severity then file+line for deterministic output.
+ */
 export function generateReport(opts: GenerateReportOptions): ReportResult {
   const { repoUrl, branch, totalFilesFound, totalFilesScanned, issues } = opts;
 
@@ -66,12 +99,9 @@ export function generateReport(opts: GenerateReportOptions): ReportResult {
 
   const summary: ReportSummary = {
     overall_level: deriveOverallLevel(issues),
-    aa_pass_rate: Math.min(computePassRate(issues, 'A'), computePassRate(issues, 'AA')),
-    aaa_pass_rate: Math.min(
-      computePassRate(issues, 'A'),
-      computePassRate(issues, 'AA'),
-      computePassRate(issues, 'AAA'),
-    ),
+    a_pass_rate: computePassRate(issues, 'A'),
+    aa_pass_rate: computePassRate(issues, 'AA'),
+    aaa_pass_rate: computePassRate(issues, 'AAA'),
     total_issues: issues.length,
     issues_by_severity: {
       critical: countBySeverity('critical'),
@@ -122,6 +152,7 @@ export function renderMarkdownSummary(report: ReportResult): string {
     `| Metric | Value |`,
     `|--------|-------|`,
     `| Overall Level | **${summary.overall_level}** |`,
+    `| A Pass Rate | ${summary.a_pass_rate}% |`,
     `| AA Pass Rate | ${summary.aa_pass_rate}% |`,
     `| AAA Pass Rate | ${summary.aaa_pass_rate}% |`,
     `| Total Issues | ${summary.total_issues} |`,

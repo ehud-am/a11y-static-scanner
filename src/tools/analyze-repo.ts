@@ -76,6 +76,21 @@ function quickSummaryText(report: ReturnType<typeof generateReport>): string {
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
+/**
+ * MCP tool handler for `analyze_repo`.
+ *
+ * Downloads the repository, discovers React + HTML files, runs the analysis
+ * engine, and renders the result in the requested format.
+ *
+ * The temporary directory created during download is always cleaned up in the
+ * `finally` block, even if analysis throws.
+ *
+ * @returns A string appropriate for the chosen format:
+ *   - `"json"`     → JSON-serialised {@link ReportResult}
+ *   - `"markdown"` → human-readable Markdown summary
+ *   - `"pdf"`      → confirmation message with the saved file path
+ *   - `"excel"`    → confirmation message with the saved file path
+ */
 export async function handleAnalyzeRepo(input: AnalyzeRepoInput): Promise<string> {
   const { repo_url, token, branch, path_filter, format, output_path } = input;
 
