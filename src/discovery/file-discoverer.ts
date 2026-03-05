@@ -109,6 +109,22 @@ function buildGlobPatterns(pathFilter: string | undefined): {
 }
 
 /**
+ * Find all plain CSS files in the project (excluding build output and
+ * dependency directories).  SCSS/LESS/Sass are intentionally excluded because
+ * they require compilation before colour values can be resolved statically.
+ */
+export async function discoverCssFiles(rootPath: string): Promise<string[]> {
+  const files = await fg(['**/*.css'], {
+    cwd: rootPath,
+    absolute: true,
+    ignore: EXCLUDE_DIRS,
+    followSymbolicLinks: false,
+    onlyFiles: true,
+  });
+  return files.sort();
+}
+
+/**
  * Find all HTML files in the project root (index.html, public/index.html, etc.)
  * that are not inside build output or dependency directories.
  */

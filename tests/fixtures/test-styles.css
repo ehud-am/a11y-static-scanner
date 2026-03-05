@@ -1,0 +1,34 @@
+/* Test stylesheet used by css-contrast-component.tsx fixture */
+
+/* Failing: #aaa on white = 2.32:1 (below 4.5:1 minimum) */
+.low-contrast-text {
+  color: #aaa;
+}
+
+/* Failing: light-on-light combination */
+.pale-on-white {
+  color: #ccc;
+  background-color: #fff;
+}
+
+/* Passing: black on white = 21:1 */
+.high-contrast-text {
+  color: #000;
+  background-color: #fff;
+}
+
+/* Passing: dark grey on white = 7.0:1 */
+.dark-grey-text {
+  color: #333;
+}
+
+/* Edge case: color defined via named colour that passes */
+.navy-text {
+  color: navy;
+  background-color: white;
+}
+
+/* Edge case: uses CSS variable — cannot be resolved statically, should be skipped */
+.var-color-text {
+  color: var(--brand-color);
+}

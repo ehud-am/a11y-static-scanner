@@ -406,6 +406,33 @@ export const RULE_TO_WCAG: Record<string, WcagRuleMapping> = {
     criterion: '4.1.2', level: 'A', title: 'Name, Role, Value', severity: 'serious',
     url: WCAG_CRITERIA['4.1.2'].url,
   },
+  // ── Gap-closure checks (added after comparing with pa11y results) ──────────
+  /**
+   * Fallback for <img> elements with no alt attribute at all.
+   * ESLint jsx-a11y/alt-text covers this too; the dedup pair in engine.ts
+   * ensures only one issue is reported per element.
+   */
+  'custom/img-missing-alt': {
+    criterion: '1.1.1', level: 'A', title: 'Non-text Content', severity: 'critical',
+    url: WCAG_CRITERIA['1.1.1'].url,
+  },
+  /**
+   * Colour-contrast violation detected via a CSS stylesheet class.
+   * Complements custom/low-color-contrast which only covers inline styles.
+   */
+  'custom/css-class-low-contrast': {
+    criterion: '1.4.3', level: 'AA', title: 'Contrast (Minimum)', severity: 'serious',
+    url: WCAG_CRITERIA['1.4.3'].url,
+  },
+  /**
+   * Anchor href="#id" where no element with the matching id exists in the
+   * scanned source files.  Requires runtime DOM to verify definitively, but
+   * static cross-file ID matching catches the most common cases.
+   */
+  'custom/broken-anchor-link': {
+    criterion: '2.4.1', level: 'A', title: 'Bypass Blocks', severity: 'serious',
+    url: WCAG_CRITERIA['2.4.1'].url,
+  },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

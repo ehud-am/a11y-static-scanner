@@ -4,6 +4,7 @@ import * as url from 'node:url';
 import { runEslintPass } from '../src/analysis/eslint-pass.js';
 import { runAstPass } from '../src/analysis/ast-pass.js';
 import { analyzeFiles } from '../src/analysis/engine.js';
+import { buildCssColorMap } from '../src/analysis/css-pass.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -199,11 +200,15 @@ describe('analyzeFiles', () => {
     // and produce issues when no skip link or landmark is found — so the
     // overall result is not empty.  Assert that no per-file issues exist.
     const issues = await analyzeFiles(['/tmp/does-not-exist-12345.tsx'], '/tmp');
-    const perFileIssues = issues.filter(
-      (i) => i.rule_id !== 'custom/skip-link-missing' &&
-              i.rule_id !== 'custom/missing-main-landmark' &&
-              i.rule_id !== 'custom/missing-nav-landmark',
-    );
+    // Filter out all app-level checks (which may fire against other files in
+    // the /tmp directory, e.g. HTML files discovered by the broken-anchor pass)
+    const APP_LEVEL_RULES = new Set([
+      'custom/skip-link-missing',
+      'custom/missing-main-landmark',
+      'custom/missing-nav-landmark',
+      'custom/broken-anchor-link',
+    ]);
+    const perFileIssues = issues.filter((i) => !APP_LEVEL_RULES.has(i.rule_id));
     expect(perFileIssues).toEqual([]);
   });
 
@@ -221,6 +226,149 @@ describe('analyzeFiles', () => {
     for (const rp of relPaths) {
       expect(['good-component.tsx', 'bad-component.tsx', 'mixed-component.tsx']).toContain(rp);
     }
+  });
+});
+
+// ─── Rec 1: Broken anchor links ───────────────────────────────────────────────
+
+describe('broken anchor link detection (custom/broken-anchor-link)', () => {
+  it('flags href="#id" when the target id is nowhere in the project', async () => {
+    const filePath = path.join(FIXTURES, 'broken-anchor-component.tsx');
+    const issues = await analyzeFiles([filePath], FIXTURES);
+    const anchorIssues = issues.filter((i) => i.rule_id === 'custom/broken-anchor-link');
+    // Two broken anchors: #nonexistent-section and #missing-target
+    expect(anchorIssues.length).toBe(2);
+    const ids = anchorIssues.map((i) => {
+      const m = i.message.match(/href="#([\w-]+)"/);
+      return m?.[1];
+    });
+    expect(ids).toContain('nonexistent-section');
+    expect(ids).toContain('missing-target');
+  });
+
+  it('does NOT flag href="#id" when a matching id exists in the same file', async () => {
+    const filePath = path.join(FIXTURES, 'broken-anchor-component.tsx');
+    const issues = await analyzeFiles([filePath], FIXTURES);
+    const anchorIssues = issues.filter((i) => i.rule_id === 'custom/broken-anchor-link');
+    // #real-section has id="real-section" in the same file — should not be flagged
+    expect(anchorIssues.every((i) => !i.message.includes('#real-section'))).toBe(true);
+  });
+
+  it('broken anchor issues have correct WCAG mapping', async () => {
+    const filePath = path.join(FIXTURES, 'broken-anchor-component.tsx');
+    const issues = await analyzeFiles([filePath], FIXTURES);
+    const anchorIssue = issues.find((i) => i.rule_id === 'custom/broken-anchor-link');
+    expect(anchorIssue).toBeDefined();
+    expect(anchorIssue!.wcag_criterion).toBe('2.4.1');
+    expect(anchorIssue!.wcag_level).toBe('A');
+    expect(anchorIssue!.severity).toBe('serious');
+  });
+});
+
+// ─── Rec 2: CSS class-based contrast detection ────────────────────────────────
+
+describe('CSS class contrast detection (custom/css-class-low-contrast)', () => {
+  it('buildCssColorMap extracts colour values from .css files', async () => {
+    const cssFile = path.join(FIXTURES, 'test-styles.css');
+    const map = await buildCssColorMap([cssFile]);
+
+    // .low-contrast-text { color: #aaa }
+    expect(map.has('low-contrast-text')).toBe(true);
+    expect(map.get('low-contrast-text')!.color).toEqual([170, 170, 170]);
+
+    // .high-contrast-text has both color and background-color
+    expect(map.has('high-contrast-text')).toBe(true);
+    expect(map.get('high-contrast-text')!.color).toEqual([0, 0, 0]);
+    expect(map.get('high-contrast-text')!.backgroundColor).toEqual([255, 255, 255]);
+
+    // .var-color-text uses var() — should not be in the map
+    expect(map.has('var-color-text')).toBe(false);
+  });
+
+  it('flags elements with a failing CSS class contrast ratio', async () => {
+    const filePath = path.join(FIXTURES, 'css-contrast-component.tsx');
+    // FIXTURES is the repo root so test-styles.css is discovered automatically
+    const issues = await analyzeFiles([filePath], FIXTURES);
+    const contrastIssues = issues.filter((i) => i.rule_id === 'custom/css-class-low-contrast');
+    expect(contrastIssues.length).toBeGreaterThan(0);
+    // At least .low-contrast-text and .pale-on-white should be flagged
+    const classNames = contrastIssues.map((i) => {
+      const m = i.message.match(/\.([a-zA-Z][\w-]*)/);
+      return m?.[1];
+    });
+    expect(classNames).toContain('low-contrast-text');
+    expect(classNames).toContain('pale-on-white');
+  });
+
+  it('does NOT flag elements with passing CSS class contrast', async () => {
+    const filePath = path.join(FIXTURES, 'css-contrast-component.tsx');
+    const issues = await analyzeFiles([filePath], FIXTURES);
+    const contrastIssues = issues.filter((i) => i.rule_id === 'custom/css-class-low-contrast');
+    const classNames = contrastIssues.map((i) => {
+      const m = i.message.match(/\.([a-zA-Z][\w-]*)/);
+      return m?.[1];
+    });
+    // These classes have sufficient contrast and must not be flagged
+    expect(classNames).not.toContain('high-contrast-text');
+    expect(classNames).not.toContain('dark-grey-text');
+    expect(classNames).not.toContain('navy-text');
+    expect(classNames).not.toContain('var-color-text');
+  });
+
+  it('css-class contrast issues have correct WCAG mapping', async () => {
+    const filePath = path.join(FIXTURES, 'css-contrast-component.tsx');
+    const issues = await analyzeFiles([filePath], FIXTURES);
+    const contrastIssue = issues.find((i) => i.rule_id === 'custom/css-class-low-contrast');
+    expect(contrastIssue).toBeDefined();
+    expect(contrastIssue!.wcag_criterion).toBe('1.4.3');
+    expect(contrastIssue!.wcag_level).toBe('AA');
+    expect(contrastIssue!.severity).toBe('serious');
+  });
+});
+
+// ─── Rec 3: Missing alt attribute fallback ────────────────────────────────────
+
+describe('missing alt attribute fallback (custom/img-missing-alt)', () => {
+  it('AST pass flags <img> with no alt attribute at all', async () => {
+    const filePath = path.join(FIXTURES, 'missing-alt-component.tsx');
+    const content = await readFixture('missing-alt-component.tsx');
+    const issues = await runAstPass(filePath, content, FIXTURES);
+    const missingAltIssue = issues.find((i) => i.rule_id === 'custom/img-missing-alt');
+    expect(missingAltIssue).toBeDefined();
+    expect(missingAltIssue!.wcag_criterion).toBe('1.1.1');
+    expect(missingAltIssue!.severity).toBe('critical');
+  });
+
+  it('AST pass does NOT flag <img alt=""> (decorative empty alt)', async () => {
+    const content = `
+      import React from 'react';
+      export const Deco = () => <img src="/deco.png" alt="" />;
+    `;
+    const issues = await runAstPass('/tmp/Deco.tsx', content, '/tmp');
+    expect(issues.find((i) => i.rule_id === 'custom/img-missing-alt')).toBeUndefined();
+  });
+
+  it('AST pass does NOT flag <img> with a descriptive alt', async () => {
+    const content = `
+      import React from 'react';
+      export const Hero = () => <img src="/hero.png" alt="A scenic mountain landscape at dawn" />;
+    `;
+    const issues = await runAstPass('/tmp/Hero.tsx', content, '/tmp');
+    expect(issues.find((i) => i.rule_id === 'custom/img-missing-alt')).toBeUndefined();
+  });
+
+  it('engine deduplicates img-missing-alt when jsx-a11y/alt-text fires on same line', async () => {
+    // bad-component.tsx has <img src={imageUrl} /> (no alt) — both ESLint and AST pass
+    // should fire on it, but dedup logic should keep only one issue for 1.1.1 at that line
+    const filePath = path.join(FIXTURES, 'bad-component.tsx');
+    const issues = await analyzeFiles([filePath], FIXTURES);
+    const altIssues = issues.filter(
+      (i) => (i.rule_id === 'jsx-a11y/alt-text' || i.rule_id === 'custom/img-missing-alt') &&
+              i.file === 'bad-component.tsx',
+    );
+    // Only ONE issue should survive dedup (the preferred jsx-a11y one)
+    expect(altIssues.length).toBe(1);
+    expect(altIssues[0].rule_id).toBe('jsx-a11y/alt-text');
   });
 });
 

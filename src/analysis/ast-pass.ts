@@ -9,70 +9,8 @@ const traverse = ((_traverse as any).default ?? _traverse) as unknown as (ast: N
 import { v4 as uuidv4 } from 'uuid';
 import type { Issue } from '../types.js';
 import { getRuleMapping } from './wcag-map.js';
-
-// ─── Colour contrast helpers ───────────────────────────────────────────────────
-
-/** Convert a 3- or 6-digit hex colour to RGB. */
-function hexToRgb(hex: string): [number, number, number] | null {
-  const clean = hex.replace(/^#/, '');
-  const full =
-    clean.length === 3
-      ? clean[0] + clean[0] + clean[1] + clean[1] + clean[2] + clean[2]
-      : clean;
-  if (full.length !== 6) return null;
-  return [
-    parseInt(full.slice(0, 2), 16),
-    parseInt(full.slice(2, 4), 16),
-    parseInt(full.slice(4, 6), 16),
-  ];
-}
-
-/** Basic named-colour lookup (covers common palette used in UIs). */
-const NAMED_COLORS: Record<string, [number, number, number]> = {
-  black: [0, 0, 0], white: [255, 255, 255],
-  red: [255, 0, 0], lime: [0, 255, 0], blue: [0, 0, 255],
-  yellow: [255, 255, 0], aqua: [0, 255, 255], cyan: [0, 255, 255],
-  fuchsia: [255, 0, 255], magenta: [255, 0, 255],
-  silver: [192, 192, 192], gray: [128, 128, 128], grey: [128, 128, 128],
-  maroon: [128, 0, 0], olive: [128, 128, 0], green: [0, 128, 0],
-  purple: [128, 0, 128], teal: [0, 128, 128], navy: [0, 0, 128],
-  orange: [255, 165, 0], coral: [255, 127, 80], pink: [255, 192, 203],
-  lightgray: [211, 211, 211], lightgrey: [211, 211, 211],
-  darkgray: [169, 169, 169], darkgrey: [169, 169, 169],
-  lightblue: [173, 216, 230], lightyellow: [255, 255, 224],
-  lightgreen: [144, 238, 144], lightcoral: [240, 128, 128],
-  darkred: [139, 0, 0], darkblue: [0, 0, 139], darkgreen: [0, 100, 0],
-  indianred: [205, 92, 92], hotpink: [255, 105, 180],
-  goldenrod: [218, 165, 32], chocolate: [210, 105, 30],
-};
-
-/** Parse a CSS colour string (hex / rgb() / rgba() / named) to [R, G, B]. */
-function parseInlineColor(value: string): [number, number, number] | null {
-  const v = value.trim().toLowerCase();
-  if (v === 'transparent' || v === 'inherit' || v === 'currentcolor') return null;
-  if (v.startsWith('#')) return hexToRgb(v);
-  const rgbMatch = v.match(/^rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-  if (rgbMatch) return [+rgbMatch[1], +rgbMatch[2], +rgbMatch[3]];
-  return NAMED_COLORS[v] ?? null;
-}
-
-function srgbLinearise(c: number): number {
-  const s = c / 255;
-  return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-}
-
-function relativeLuminance([r, g, b]: [number, number, number]): number {
-  return 0.2126 * srgbLinearise(r) + 0.7152 * srgbLinearise(g) + 0.0722 * srgbLinearise(b);
-}
-
-function wcagContrastRatio(
-  c1: [number, number, number],
-  c2: [number, number, number],
-): number {
-  const l1 = relativeLuminance(c1);
-  const l2 = relativeLuminance(c2);
-  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
-}
+import { parseCssColor, wcagContrastRatio } from './color-utils.js';
+import type { CssClassColors } from './css-pass.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,6 +75,34 @@ function getElementName(node: JSXOpeningElement): string | null {
   return null;
 }
 
+/**
+ * Extract static class names from a JSX element's className attribute.
+ * Handles:
+ *   className="foo bar"          → ['foo', 'bar']
+ *   className={"foo bar"}        → ['foo', 'bar']
+ * Returns an empty array when the value is dynamic (template literal, variable).
+ */
+function extractClassNames(node: JSXOpeningElement): string[] {
+  const classAttr = node.attributes.find(
+    (a): a is JSXAttribute =>
+      a.type === 'JSXAttribute' &&
+      a.name.type === 'JSXIdentifier' &&
+      a.name.name === 'className',
+  );
+  if (!classAttr) return [];
+
+  let classString: string | null = null;
+  if (classAttr.value?.type === 'StringLiteral') {
+    classString = classAttr.value.value;
+  } else if (classAttr.value?.type === 'JSXExpressionContainer') {
+    const expr = classAttr.value.expression;
+    if (expr.type === 'StringLiteral') classString = expr.value;
+  }
+
+  if (!classString) return [];
+  return classString.split(/\s+/).filter(Boolean);
+}
+
 const NON_INTERACTIVE_ELEMENTS = new Set([
   'div', 'span', 'p', 'section', 'article', 'header', 'footer',
   'main', 'aside', 'li', 'ul', 'ol', 'dd', 'dt', 'figure',
@@ -179,10 +145,23 @@ const EMOJI_ONLY_RE = /^[\p{Emoji_Presentation}\s]+$/u;
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
+/**
+ * Run the Babel AST accessibility pass against a single JSX/TSX/JS/TS file.
+ *
+ * @param filePath     Absolute path to the source file.
+ * @param fileContent  Source content of the file.
+ * @param repoRoot     Absolute path to the repository root (used for relative
+ *                     paths in issue objects).
+ * @param cssColorMap  Optional map of CSS class names to their colour values,
+ *                     built from the project's CSS files by `buildCssColorMap`.
+ *                     When provided, elements styled via CSS classes are also
+ *                     checked for contrast violations (WCAG 1.4.3).
+ */
 export async function runAstPass(
   filePath: string,
   fileContent: string,
   repoRoot: string,
+  cssColorMap?: Map<string, CssClassColors>,
 ): Promise<Issue[]> {
   const relPath = filePath.startsWith(repoRoot + '/')
     ? filePath.slice(repoRoot.length + 1)
@@ -203,6 +182,14 @@ export async function runAstPass(
 
   /** Heading elements collected during traversal for level-skip analysis. */
   const headingElements: Array<{ level: number; line: number; column: number }> = [];
+
+  /**
+   * CSS class names already flagged for a contrast issue in this file.
+   * Prevents the same class from generating one issue per element when it is
+   * used on multiple elements — the class definition is the root cause, so a
+   * single report per file is sufficient.
+   */
+  const flaggedContrastClasses = new Set<string>();
 
   traverse(ast, {
     JSXElement(path) {
@@ -264,10 +251,23 @@ export async function runAstPass(
         return;
       }
 
-      // ── Check NEW-A: <img> non-descriptive alt text ─────────────────────────
+      // ── Check NEW-A: <img> alt attribute — missing or non-descriptive ────────
       if (tagName === 'img') {
         const alt = getAttrValue(opening, 'alt');
-        if (typeof alt === 'string' && alt.trim() !== '') {
+
+        if (alt === null) {
+          // Alt attribute is completely absent.
+          // This is a fallback for cases where the ESLint jsx-a11y/alt-text pass
+          // misses the element (e.g. unusual JSX patterns). The dedup pair
+          // ['jsx-a11y/alt-text', 'custom/img-missing-alt'] in engine.ts ensures
+          // only one issue is reported when both passes fire on the same line.
+          const issue = makeIssue(
+            'custom/img-missing-alt',
+            '<img> is missing an alt attribute. Add alt="" for purely decorative images, or a concise description of the image for informative ones (WCAG 1.1.1).',
+            relPath, line, column, fileContent,
+          );
+          if (issue) issues.push(issue);
+        } else if (typeof alt === 'string' && alt.trim() !== '') {
           const altLower = alt.trim().toLowerCase();
           if (NONDESCRIPTIVE_ALT.has(altLower)) {
             const issue = makeIssue(
@@ -422,9 +422,9 @@ export async function runAstPass(
             // colour contrast — only checkable when value is a static string literal
             if (p.value.type === 'StringLiteral') {
               if (keyName === 'color') {
-                textColor = parseInlineColor(p.value.value);
+                textColor = parseCssColor(p.value.value);
               } else if (keyName === 'backgroundColor') {
-                bgColor = parseInlineColor(p.value.value);
+                bgColor = parseCssColor(p.value.value);
               }
             }
           }
@@ -452,6 +452,50 @@ export async function runAstPass(
                 relPath, line, column, fileContent,
               );
               if (issue) issues.push(issue);
+            }
+          }
+        }
+      }
+
+      // ── Check 4b: CSS class-based colour contrast ─────────────────────────
+      // Only runs when the caller has provided a CSS colour map built from the
+      // project's stylesheets.  We inspect every static class name on this
+      // element; the first failing class produces one issue (avoids noise when
+      // multiple classes share the same problematic colour).
+      if (cssColorMap && cssColorMap.size > 0) {
+        const classNames = extractClassNames(opening);
+        const WHITE: [number, number, number] = [255, 255, 255];
+
+        for (const cls of classNames) {
+          const cssColors = cssColorMap.get(cls);
+          if (cssColors?.color) {
+            const effectiveBg = cssColors.backgroundColor ?? WHITE;
+            const ratio = wcagContrastRatio(cssColors.color, effectiveBg);
+            if (ratio < 4.5) {
+              // Skip colours that are clearly too light to be placed on a white
+              // background — a very low ratio (< 2.0) against white strongly
+              // suggests the colour is intended for a dark background that the
+              // static CSS parser could not resolve (e.g. inherited from a parent
+              // or set via a compound selector).  Reporting these would produce
+              // a large number of false positives.
+              if (!cssColors.backgroundColor && ratio < 2.0) continue;
+
+              // Each distinct CSS class name should produce at most ONE issue
+              // per file, even if the class is applied to several elements.
+              // The root cause is the class definition, not each individual use.
+              if (flaggedContrastClasses.has(cls)) continue;
+              flaggedContrastClasses.add(cls);
+
+              const bgNote = cssColors.backgroundColor
+                ? ''
+                : ' (assuming white background)';
+              const issue = makeIssue(
+                'custom/css-class-low-contrast',
+                `CSS class ".${cls}" has insufficient colour contrast ratio of ${ratio.toFixed(2)}:1${bgNote} (minimum 4.5:1 for normal text, WCAG 1.4.3).`,
+                relPath, line, column, fileContent,
+              );
+              if (issue) issues.push(issue);
+              break; // one issue per element is enough
             }
           }
         }
