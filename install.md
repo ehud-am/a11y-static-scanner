@@ -151,7 +151,143 @@ node /path/to/a11y-static-scanner/dist/a11y-scan.js scan ./src --fail-on AA --qu
 
 ---
 
-## 3 — Configure your MCP client
+## 3 — Deploy as a Docker container (macOS)
+
+Running the MCP server inside Docker means you don't need Node.js installed locally, the server runs in an isolated environment, and upgrading is just a single `docker build`.
+
+### Prerequisites
+
+Install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/). Once installed, verify it's running:
+
+```bash
+docker info
+```
+
+### 3.1 — Build the image
+
+From the project root (the directory that contains the `Dockerfile`):
+
+```bash
+docker build -t a11y-static-scanner:latest .
+```
+
+This takes ~30 seconds on the first run; subsequent builds use the layer cache and are faster. Verify the image exists:
+
+```bash
+docker images a11y-static-scanner
+```
+
+### 3.2 — Configure Claude Desktop
+
+Open `~/Library/Application Support/Claude/claude_desktop_config.json` and add the server entry.
+
+**Remote repos only** (no local path scanning):
+
+```json
+{
+  "mcpServers": {
+    "a11y-static-scanner": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "a11y-static-scanner:latest"]
+    }
+  }
+}
+```
+
+**With local path scanning** — mount your projects directory so paths inside the container match paths on your Mac:
+
+```json
+{
+  "mcpServers": {
+    "a11y-static-scanner": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/Users/YOUR_USERNAME:/Users/YOUR_USERNAME",
+        "a11y-static-scanner:latest"
+      ]
+    }
+  }
+}
+```
+
+Replace `/Users/YOUR_USERNAME` with your actual home directory path (e.g. `/Users/alice`). Because the mount uses the same path on both sides, any path you hand to `analyze_local_path` works unchanged — no path translation needed.
+
+Restart Claude Desktop after editing the config. You should see `a11y-static-scanner` listed under **Connected MCP Servers**.
+
+### 3.3 — Configure claude-code
+
+Add to your project's `.mcp.json` or to `~/.claude/mcp.json`.
+
+**Remote repos only:**
+
+```json
+{
+  "mcpServers": {
+    "a11y-static-scanner": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "a11y-static-scanner:latest"]
+    }
+  }
+}
+```
+
+**With local path scanning:**
+
+```json
+{
+  "mcpServers": {
+    "a11y-static-scanner": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/Users/YOUR_USERNAME:/Users/YOUR_USERNAME",
+        "a11y-static-scanner:latest"
+      ]
+    }
+  }
+}
+```
+
+Or register from the terminal:
+
+```bash
+# Remote repos only
+claude mcp add a11y-static-scanner -- \
+  docker run -i --rm a11y-static-scanner:latest
+
+# With local path scanning
+claude mcp add a11y-static-scanner -- \
+  docker run -i --rm \
+  -v /Users/YOUR_USERNAME:/Users/YOUR_USERNAME \
+  a11y-static-scanner:latest
+```
+
+### 3.4 — Test the container
+
+Confirm the server responds over stdio before connecting it to a client:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  | docker run -i --rm a11y-static-scanner:latest
+```
+
+You should see a JSON response listing `analyze_local_path`, `analyze_repo`, and `get_wcag_rule_detail`.
+
+### 3.5 — Rebuild after updates
+
+When you pull new source code, rebuild the image to pick up changes:
+
+```bash
+git pull
+docker build -t a11y-static-scanner:latest .
+```
+
+No client reconfiguration is needed — the `docker run` command stays the same.
+
+---
+
+## 4 — Configure your MCP client (from source)
 
 ### Claude Desktop (`claude_desktop_config.json`)
 
@@ -222,7 +358,7 @@ This uses `tsx` to run the TypeScript source directly.
 
 ---
 
-## 4 — Output formats
+## 5 — Output formats
 
 Both `analyze_local_path` and `analyze_repo` support four output formats via the `format` parameter:
 
@@ -247,7 +383,7 @@ The Excel workbook contains three sheets: **Summary** (compliance metrics), **Is
 
 ---
 
-## 5 — Authenticate with private repositories
+## 6 — Authenticate with private repositories
 
 Tokens are passed per-call as the `token` parameter — they are **never stored** by the server.
 
@@ -269,7 +405,7 @@ Analyse https://github.com/my-org/my-private-repo using token ghp_xxxx
 
 ---
 
-## 6 — Verify installation
+## 7 — Verify installation
 
 Ask Claude (or your MCP client):
 
@@ -293,7 +429,7 @@ Run an accessibility audit on https://github.com/facebook/create-react-app
 
 ---
 
-## 7 — Run the test suite
+## 8 — Run the test suite
 
 ```bash
 npm test                   # One-time run

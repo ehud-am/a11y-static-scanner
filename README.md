@@ -6,6 +6,54 @@ Point it at a GitHub or GitLab repo — public or private — **or at a local fo
 
 ---
 
+## Installation & Setup
+
+See **[install.md](install.md)** for the full operational guide, covering:
+
+| Topic | Section |
+|-------|---------|
+| Install from source (Node.js 20+) | § 1 |
+| CLI usage and build pipeline integration | § 2 |
+| Docker deployment on macOS | § 3 |
+| Claude Desktop and claude-code configuration | § 4 |
+| Output formats (JSON, Markdown, PDF, Excel) | § 5 |
+| Private repo authentication (GitHub / GitLab tokens) | § 6 |
+| Verifying the installation | § 7 |
+| Running the test suite | § 8 |
+
+---
+
+## Scanning Engine
+
+Every file goes through **two independent passes**, each chosen for what it does best:
+
+### Pass 1 — ESLint + `eslint-plugin-jsx-a11y`
+
+[`eslint-plugin-jsx-a11y`](https://github.com/jsx-eslint/eslint-plugin-jsx-a11y) is the de-facto standard for React accessibility linting. It covers 30+ WCAG-mapped rules and is used by Create React App, Next.js, and most large-scale React projects.
+
+**Why it's the right tool here:**
+- Rules are written by accessibility experts and vetted against the WCAG spec
+- Handles JSX-specific patterns (prop spreading, conditional rendering, dynamic `className`) that generic HTML linters miss
+- Produces precise file/line/column locations with actionable messages
+- Actively maintained with WCAG 2.2 updates tracked
+
+It catches the broad surface area: missing `alt` text, invalid ARIA roles and props, unlabelled form controls, inaccessible links, missing language attributes, and more.
+
+### Pass 2 — Custom Babel AST analysis
+
+ESLint rules are intentionally scoped and conservative — they avoid false positives by not reasoning across component boundaries or about inline styles. The custom Babel AST pass fills those gaps by walking the full JSX syntax tree with project-specific logic.
+
+**Why Babel's parser is the right tool here:**
+- Parses `.tsx`/`.jsx` with full fidelity — no transpilation, no execution
+- Exposes the raw AST so checks can look at attribute values, child nodes, and style objects simultaneously
+- Runs in the same process as the ESLint pass with no additional toolchain overhead
+
+It catches patterns the ESLint plugin intentionally leaves out: SVGs rendered without accessible names, tables missing `<caption>`, focus outlines removed via inline styles (`outline: 'none'`), and `role="button"` elements missing keyboard handlers.
+
+**Together, the two passes provide defence-in-depth:** ESLint covers breadth across the WCAG ruleset; the AST pass covers depth on the patterns most commonly introduced by React developers that slip past linting.
+
+---
+
 ## Features
 
 - **Two analysis passes per file**
