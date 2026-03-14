@@ -8,7 +8,7 @@ Point it at a GitHub or GitLab repo — public or private — **or at a local fo
 
 ## Installation & Setup
 
-See **[install.md](install.md)** for the full operational guide, covering:
+See **[INSTALL.md](INSTALL.md)** for the full operational guide, covering:
 
 | Topic | Section |
 |-------|---------|
